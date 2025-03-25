@@ -58,12 +58,23 @@ float totalLiters = 0;
 unsigned long lastSensorUpdate = 0;
 
 
-// Load Cell Pins
-#define LOADCELL_DT 33  // Data pin (DOUT)
-#define LOADCELL_SCK 4 // Clock pin (SCK)
+//ultrasonic sensor pins
+#define TRIGGER_PIN 12
+#define ECHO_PIN 13
+#define CONTAINER_HEIGHT 30.0  // Example: container height in cm
+#define CONTAINER_AREA 200.0
 
-// Create HX711 object
-// HX711_ADC loadCell(LOADCELL_DT, LOADCELL_SCK);
+float measureDistance() {
+    digitalWrite(TRIGGER_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIGGER_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIGGER_PIN, LOW);
+    
+    long duration = pulseIn(ECHO_PIN, HIGH);
+    float distance = (duration * 0.0343) / 2;  // Convert to cm
+    return distance;
+}
 
 // Load Cell Variables
 float weight = 0.0;
@@ -241,8 +252,8 @@ void connectMQTT() {
 void setup() {
     Serial.begin(115200);
     WiFi.setSleep(true);
-
-    //   // Initialize BLE
+     
+    // Initialize BLE
     BLEDevice::init("ESP32");
 
     // Create BLE Server
@@ -280,6 +291,10 @@ void setup() {
     pinMode(SV_METHANOL, OUTPUT);
     pinMode(SV_BIODIESEL, OUTPUT);
 
+    // ultrasonic sensor setup
+    pinMode(TRIGGER_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+
     // Set all relays OFF (HIGH if active LOW)
     digitalWrite(PUMP_ONE, HIGH);
     digitalWrite(PUMP_TWO, HIGH);
@@ -289,17 +304,6 @@ void setup() {
     digitalWrite(SV_METHANOL, HIGH);
     digitalWrite(SV_BIODIESEL, HIGH);
 
-
-    // loadCell.begin();
-    // loadCell.start(2000); 
-
-    
-    // if (loadCell.getTareTimeoutFlag()) {
-    //     Serial.println(F("Tare timeout, check wiring!"));
-    // } else {
-    //     loadCell.setCalFactor(2280.0); // Adjust based on calibration
-    //     Serial.println("Load Cell Ready!");
-    // }
 
 
     pinMode(BUTTON_ONE, INPUT_PULLUP);
@@ -342,6 +346,14 @@ void updateSensors() {
         Serial.print(currentTemp);
         Serial.println(" °C");
 
+        //read ultrasonic sensor 
+        float biodieselLevel = CONTAINER_HEIGHT - measureDistance();  // Oil height
+        if (biodieselLevel < 0) biodieselLevel = 0;  // Ensure no negative values
+        
+        float volume = biodieselLevel * CONTAINER_AREA / 1000.0;  // Convert cm³ to liters
+        Serial.print("Oil Level: "); Serial.print(biodieselLevel); Serial.print(" cm, ");
+        Serial.print("Volume: "); Serial.print(volume); Serial.println(" L");
+
         // Read Flow Rate
         noInterrupts();
         float pulses = pulseCount;
@@ -351,12 +363,6 @@ void updateSensors() {
         flowRate = (pulses / pulsesPerLiter) * 60.0;
         totalLiters += (pulses / pulsesPerLiter);
         client.publish(TOPIC_FLOWRATE, String(flowRate, 2).c_str());
-
-        // Read Load Cell (Weight)
-        // weight = loadCell.getData();
-        // Serial.print("Weight: ");
-        // Serial.print(weight, 2);
-        // Serial.println(" g");
 
         //publish biodiesel
         client.publish(TOPIC_BIODIESEL, String(flowRate, 2).c_str());
